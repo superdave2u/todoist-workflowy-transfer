@@ -8,10 +8,10 @@ Inside WSL, install [uv](https://docs.astral.sh/uv/), copy `.env.example` to `.e
 
 ```bash
 mkdir -p data logs
-uv sync --group dev
+uv sync --locked
 uv run reference-transfer collect
 uv run reference-transfer work
-uv run pytest
+uv run --with pytest pytest -q
 ```
 
 ## Cron
@@ -25,9 +25,9 @@ Use one non-blocking lock shared by both schedules. Replace paths with absolute 
 
 The worker claims the 10 oldest ready items, works sequentially, limits Todoist and Workflowy independently to 20 requests/minute by default, honors server retry instructions, and uses full-jitter exponential backoff for transient failures.
 
-## Docker Compose
+## Optional Docker Compose Deployment
 
-Docker Compose runs the hourly collector and one-minute worker as separate restartable services. Both containers share a named volume for the SQLite queue and mappings.
+Use Docker Compose later when you want long-running, restartable collector and worker services. Both containers share a named volume for the SQLite queue and mappings.
 
 ```bash
 cp .env.example .env
