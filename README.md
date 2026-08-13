@@ -36,6 +36,12 @@ docker compose up -d --build
 docker compose logs -f collector worker
 ```
 
+If a one-shot worker is intentionally stopped, return its claimed jobs to the queue before restarting it:
+
+```bash
+docker compose run --rm worker reference-transfer recover
+```
+
 Run the containerized test suite with:
 
 ```bash

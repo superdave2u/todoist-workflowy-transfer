@@ -11,7 +11,7 @@ from .storage import Storage
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Queue Todoist @reference tasks for Workflowy transfer")
-    parser.add_argument("command", choices=("collect", "work"))
+    parser.add_argument("command", choices=("collect", "work", "recover"))
     args = parser.parse_args()
     settings = Settings.from_env()
     storage = Storage(settings.database_path)

@@ -63,14 +63,14 @@ class TodoistClient(RateLimitedClient):
     def __init__(self, token: str, rpm: int, storage: Storage):
         super().__init__("todoist", "https://api.todoist.com/api/v1", token, rpm, storage)
 
-    def _all(self, path: str) -> list[dict[str, Any]]:
+    def _all(self, path: str, params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
         cursor: str | None = None
         output: list[dict[str, Any]] = []
         while True:
-            params = {"limit": 200}
+            page_params = {"limit": 200, **(params or {})}
             if cursor:
-                params["cursor"] = cursor
-            response = self.request("GET", path, params=params)
+                page_params["cursor"] = cursor
+            response = self.request("GET", path, params=page_params)
             output.extend(response.get("results", response if isinstance(response, list) else []))
             cursor = response.get("next_cursor") if isinstance(response, dict) else None
             if not cursor:
@@ -79,8 +79,20 @@ class TodoistClient(RateLimitedClient):
     def active_tasks(self) -> list[dict[str, Any]]:
         return self._all("/tasks")
 
+    def reference_tasks(self) -> list[dict[str, Any]]:
+        return self._all("/tasks/filter", {"query": "@reference"})
+
     def projects(self) -> list[dict[str, Any]]:
         return self._all("/projects")
+
+    def task(self, task_id: str) -> dict[str, Any]:
+        return self.request("GET", f"/tasks/{task_id}")
+
+    def project(self, project_id: str) -> dict[str, Any]:
+        return self.request("GET", f"/projects/{project_id}")
+
+    def children(self, task_id: str) -> list[dict[str, Any]]:
+        return self._all("/tasks", {"parent_id": task_id})
 
     def delete_task(self, task_id: str) -> None:
         self.request("DELETE", f"/tasks/{task_id}")

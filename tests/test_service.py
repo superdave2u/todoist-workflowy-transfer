@@ -20,8 +20,20 @@ class FakeTodoist:
     def active_tasks(self) -> list[dict]:
         return self.tasks
 
+    def reference_tasks(self) -> list[dict]:
+        return [item for item in self.tasks if "reference" in item["labels"]]
+
     def projects(self) -> list[dict]:
         return self.project_list
+
+    def task(self, task_id: str) -> dict:
+        return next(item for item in self.tasks if item["id"] == task_id)
+
+    def project(self, project_id: str) -> dict:
+        return next(item for item in self.project_list if item["id"] == project_id)
+
+    def children(self, task_id: str) -> list[dict]:
+        return [item for item in self.tasks if item.get("parent_id") == task_id]
 
     def delete_task(self, task_id: str) -> None:
         self.deleted.append(task_id)

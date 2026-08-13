@@ -105,6 +105,16 @@ class Storage:
             )
         return result.rowcount
 
+    def release_processing(self) -> int:
+        """Return jobs claimed by a deliberately stopped worker to the queue."""
+        with self.connection:
+            result = self.connection.execute(
+                "UPDATE jobs SET state='retry', lease_until=NULL, next_attempt_at=?, updated_at=? "
+                "WHERE state='processing'",
+                (stamp(), stamp()),
+            )
+        return result.rowcount
+
     def claim(self, limit: int, lease_seconds: int) -> list[Job]:
         current = now()
         lease = stamp(current + timedelta(seconds=lease_seconds))

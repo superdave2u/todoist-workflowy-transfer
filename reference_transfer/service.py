@@ -91,15 +91,15 @@ class TransferService:
         self.settings, self.storage, self.todoist, self.workflowy, self.logger = settings, storage, todoist, workflowy, logger
 
     def collect(self) -> int:
-        tasks = self.todoist.active_tasks()
-        projects = {str(project["id"]): project for project in self.todoist.projects()}
+        tasks = self.todoist.reference_tasks()
+        projects: dict[str, dict[str, Any]] = {}
         by_id = {str(task["id"]): task for task in tasks}
         count = 0
         for task in tasks:
             if not is_eligible(task):
                 continue
             ancestors = eligible_ancestors(task, by_id)
-            project = projects.get(str(task.get("project_id")))
+            project = self._project_for(task, projects)
             payload = {"task": task, "project": project, "eligible_ancestor_ids": ancestors}
             action = self.storage.enqueue(str(task["id"]), payload, payload_hash(task, project, ancestors))
             if action != "unchanged":
@@ -108,24 +108,28 @@ class TransferService:
         event(self.logger, "collector_finished", queued=count, active_tasks=len(tasks))
         return count
 
+    def recover(self) -> int:
+        released = self.storage.release_processing()
+        event(self.logger, "processing_jobs_released", released=released)
+        return released
+
     def work(self) -> int:
         reclaimed = self.storage.reclaim_expired_leases()
         jobs = self.storage.claim(self.settings.batch_size, self.settings.lease_seconds)
         if not jobs:
             event(self.logger, "worker_finished", claimed=0, reclaimed=reclaimed)
             return 0
-        try:
-            active_tasks = self.todoist.active_tasks()
-            projects = {str(project["id"]): project for project in self.todoist.projects()}
-        except ApiError as exc:
-            for job in jobs:
-                self._retry(job, exc)
-            return 0
-
-        by_id = {str(task["id"]): task for task in active_tasks}
+        projects: dict[str, dict[str, Any]] = {}
         prepared: list[tuple[Job, dict[str, Any], dict[str, Any] | None, list[str]]] = []
-        for job in sorted(jobs, key=lambda item: len(item.payload.get("eligible_ancestor_ids", []))):
-            task = by_id.get(job.task_id)
+        for job in jobs:
+            try:
+                task = self.todoist.task(job.task_id)
+            except ApiError as exc:
+                if exc.status_code == 404:
+                    self._absent_source(job)
+                else:
+                    self._retry(job, exc)
+                continue
             if task is None:
                 self._absent_source(job)
                 continue
@@ -135,13 +139,17 @@ class TransferService:
                     self.storage.set_mapping_status(job.task_id, "retained")
                 event(self.logger, "job_cancelled", task_id=job.task_id, reason="label_removed")
                 continue
-            ancestors = eligible_ancestors(task, by_id)
+            try:
+                ancestors = self._live_eligible_ancestors(task)
+                project = self._project_for(task, projects)
+            except ApiError as exc:
+                self._retry(job, exc)
+                continue
             dependency = ancestors[-1] if ancestors else None
             if dependency and not self.storage.get_mapping(dependency) and self.storage.dependency_open(dependency):
                 self.storage.set_job(job.task_id, "pending", next_attempt_at=now() + timedelta(minutes=1), error="waiting for parent")
                 event(self.logger, "job_deferred", task_id=job.task_id, dependency=dependency)
                 continue
-            project = projects.get(str(task.get("project_id")))
             try:
                 self._sync_workflowy(job, task, project, dependency)
             except ApiError as exc:
@@ -151,7 +159,11 @@ class TransferService:
 
         # Delete deepest tasks first. A parent waits until every active descendant is mirrored/deleted.
         for job, task, _project, _ancestors in sorted(prepared, key=lambda value: len(value[3]), reverse=True):
-            children = descendants(job.task_id, active_tasks)
+            try:
+                children = self._live_descendants(job.task_id)
+            except ApiError as exc:
+                self._retry(job, exc)
+                continue
             if any(not is_eligible(child) for child in children):
                 self.storage.set_job(job.task_id, "retained", error="untagged descendant prevents safe deletion")
                 self.storage.set_mapping_status(job.task_id, "retained")
@@ -172,6 +184,39 @@ class TransferService:
             self._complete(job)
         event(self.logger, "worker_finished", claimed=len(jobs), reclaimed=reclaimed)
         return len(jobs)
+
+    def _project_for(self, task: dict[str, Any], cache: dict[str, dict[str, Any]]) -> dict[str, Any] | None:
+        project_id = str(task.get("project_id") or "")
+        if not project_id:
+            return None
+        if project_id not in cache:
+            cache[project_id] = self.todoist.project(project_id)
+        return cache[project_id]
+
+    def _live_eligible_ancestors(self, task: dict[str, Any]) -> list[str]:
+        ancestors: list[str] = []
+        parent_id = task.get("parent_id")
+        while parent_id:
+            try:
+                parent = self.todoist.task(parent_id)
+            except ApiError as exc:
+                if exc.status_code == 404:
+                    return []
+                raise
+            if not is_eligible(parent):
+                return []
+            ancestors.append(parent_id)
+            parent_id = parent.get("parent_id")
+        return list(reversed(ancestors))
+
+    def _live_descendants(self, task_id: str) -> list[dict[str, Any]]:
+        found: list[dict[str, Any]] = []
+        pending = [task_id]
+        while pending:
+            children = self.todoist.children(pending.pop())
+            found.extend(children)
+            pending.extend(str(child["id"]) for child in children)
+        return found
 
     def _root_id(self) -> str:
         key = "workflowy_root_id"

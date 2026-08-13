@@ -14,3 +14,11 @@ def test_claims_oldest_jobs_first(tmp_path) -> None:
     store.enqueue("first", {"task": {"id": "first"}}, "a")
     store.enqueue("second", {"task": {"id": "second"}}, "b")
     assert [job.task_id for job in store.claim(10, 60)] == ["first", "second"]
+
+
+def test_recover_releases_processing_jobs(tmp_path) -> None:
+    store = Storage(tmp_path / "queue.sqlite3")
+    store.enqueue("one", {"task": {"id": "one"}}, "a")
+    store.claim(1, 60)
+    assert store.release_processing() == 1
+    assert [job.task_id for job in store.claim(1, 60)] == ["one"]
