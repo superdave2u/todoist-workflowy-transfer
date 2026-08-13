@@ -22,7 +22,7 @@ services:
       - |
         trap 'exit 0' TERM INT
         while true; do
-          reference-transfer collect
+          uv run --locked reference-transfer collect
           sleep 3600 & wait $!
         done
 
@@ -34,7 +34,7 @@ services:
       - |
         trap 'exit 0' TERM INT
         while true; do
-          reference-transfer work
+          uv run --locked reference-transfer work
           sleep 60 & wait $!
         done
 

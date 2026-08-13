@@ -11,7 +11,7 @@ mkdir -p data logs
 uv sync --locked
 uv run reference-transfer collect
 uv run reference-transfer work
-uv run --with pytest pytest -q
+uv run --locked --extra test pytest -q
 ```
 
 ## Cron
@@ -39,7 +39,7 @@ docker compose logs -f collector worker
 If a one-shot worker is intentionally stopped, return its claimed jobs to the queue before restarting it:
 
 ```bash
-docker compose run --rm worker reference-transfer recover
+docker compose run --rm worker uv run --locked reference-transfer recover
 ```
 
 Run the containerized test suite with:
