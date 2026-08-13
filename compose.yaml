@@ -1,0 +1,48 @@
+name: todoist-workflowy-transfer
+
+x-transfer-service: &transfer-service
+  build:
+    context: .
+    dockerfile: Dockerfile
+  env_file:
+    - path: .env
+      required: false
+  environment:
+    DATABASE_PATH: /app/data/reference-transfer.sqlite3
+  volumes:
+    - transfer-data:/app/data
+  restart: unless-stopped
+
+services:
+  collector:
+    <<: *transfer-service
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        trap 'exit 0' TERM INT
+        while true; do
+          reference-transfer collect
+          sleep 3600 & wait $!
+        done
+
+  worker:
+    <<: *transfer-service
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        trap 'exit 0' TERM INT
+        while true; do
+          reference-transfer work
+          sleep 60 & wait $!
+        done
+
+  test:
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+    profiles: [test]
+
+volumes:
+  transfer-data:
